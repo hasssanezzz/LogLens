@@ -34,9 +34,9 @@ func (api *API) getHandler(w http.ResponseWriter, r *http.Request) {
 
 	result, err := api.LogLens.Search(context.Background(), q)
 	if err != nil {
-		w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("server failed to process the query"))
-		log.Printf("bad query recieved %+v: %v\n", q, err)
+		log.Printf("bad query recieved \n%+v\nerror: %v\n", q, err)
 		return
 	}
 
@@ -48,7 +48,7 @@ func (api *API) postHandler(w http.ResponseWriter, r *http.Request) {
 	KV := map[string]string{}
 	for key, value := range r.Header {
 		if strings.HasPrefix(strings.ToLower(key), "kv-") {
-			KV[key[2:]] = strings.Join(value, "")
+			KV[key[3:]] = strings.Join(value, "")
 		}
 	}
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -26,20 +27,20 @@ func (m *DiskStorageManager) GenerateBatchPath(ctx context.Context, start time.T
 		fmt.Sprintf("%d", start.Year()),
 		fmt.Sprintf("%d", int(start.Month())),
 		fmt.Sprintf("%d", start.Day()),
-		fmt.Sprintf("%02d%02d-%02d%02d.zstd", start.Hour(), start.Minute(), end.Hour(), end.Minute()),
+		fmt.Sprintf("%d-%d.zstd", start.UnixMicro(), end.UnixMicro()),
 	)
 }
 
 func (m *DiskStorageManager) WriteBatch(ctx context.Context, path string, data []byte) (string, error) {
 	err := os.MkdirAll(filepath.Dir(path), 0755)
 	if err != nil {
-		println("can not create zstd folder path")
+		log.Println("can not create zstd folder path")
 		return "", err
 	}
 
 	err = os.WriteFile(path, data, 0644)
 	if err != nil {
-		println("can not create zstd file")
+		log.Println("can not create zstd file")
 		return "", err
 	}
 

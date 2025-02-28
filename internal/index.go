@@ -12,12 +12,16 @@ import (
 	"github.com/blevesearch/bleve/v2/mapping"
 )
 
-type BleveIndexManager struct {
-	index bleve.Index
-	mu    sync.RWMutex
+const ChanSize = 1000
+
+type DiskIndexManager struct {
+	consumeLogChan   chan *LogEntry
+	consumeBatchChan chan []*LogEntry
+	index            bleve.Index
+	mu               sync.RWMutex
 }
 
-func NewBleveIndexManager(indexPath string) (*BleveIndexManager, error) {
+func NewBleveIndexManager(indexPath string) (IndexManager, error) {
 	index, err := bleve.Open(indexPath)
 	if err == bleve.ErrorIndexPathDoesNotExist {
 		mapping := createIndexMapping()
@@ -29,28 +33,51 @@ func NewBleveIndexManager(indexPath string) (*BleveIndexManager, error) {
 		return nil, fmt.Errorf("failed to open Bleve index: %v", err)
 	}
 
-	return &BleveIndexManager{
-		index: index,
-	}, nil
+	m := &DiskIndexManager{
+		index:            index,
+		consumeLogChan:   make(chan *LogEntry, ChanSize),
+		consumeBatchChan: make(chan []*LogEntry, ChanSize),
+	}
+
+	go m.Listen(context.Background())
+
+	return m, nil
 }
 
-func (m *BleveIndexManager) IndexLog(ctx context.Context, log *LogEntry) error {
+func (m *DiskIndexManager) Listen(ctx context.Context) {
+	for {
+		select {
+		case batch := <-m.consumeBatchChan:
+			if err := m.IndexBatch(ctx, batch); err != nil {
+				glog.Printf("failed to index a batch: %v\n", err)
+			}
+		}
+	}
+}
+
+func (m *DiskIndexManager) Consume(ctx context.Context, batch []*LogEntry) {
+	println("[batch c]", len(m.consumeBatchChan))
+	m.consumeBatchChan <- batch
+}
+
+func (m *DiskIndexManager) IndexLog(ctx context.Context, log *LogEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	id := positionToId(&log.position)
 	if err := m.index.Index(id, log); err != nil {
-		return fmt.Errorf("failed to index log %s: %v", id, err)
+		errString := fmt.Sprintf("failed to index log %s: %v", id, err)
+		glog.Println(errString)
+		return err
 	}
 	return nil
 }
 
-func (m *BleveIndexManager) IndexBatch(ctx context.Context, batch []LogEntry) error {
+func (m *DiskIndexManager) IndexBatch(ctx context.Context, batch []*LogEntry) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	log.Println("indexing a batch...")
-	println(m.index.DocCount())
 
 	start := time.Now()
 
@@ -72,19 +99,25 @@ func (m *BleveIndexManager) IndexBatch(ctx context.Context, batch []LogEntry) er
 	return nil
 }
 
-func (m *BleveIndexManager) DeleteFromIndex(ctx context.Context, ids []string) error {
+func (m *DiskIndexManager) DeleteFromIndex(ctx context.Context, ids []string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	start := time.Now()
+	errors := []error{}
 	for _, id := range ids {
 		if err := m.index.Delete(id); err != nil {
-			return fmt.Errorf("failed to delete log %s: %v", id, err)
+			log.Printf("failed to delete log %s: %v\n", id, err)
+			errors = append(errors, err) // TODO: return errors
 		}
 	}
+
+	log.Printf("deleted %d entries from the index in %dms\n", len(ids), time.Since(start).Milliseconds())
+
 	return nil
 }
 
-func (m *BleveIndexManager) DeleteSingleLogFromIndex(ctx context.Context, id string) error {
+func (m *DiskIndexManager) DeleteSingleLogFromIndex(ctx context.Context, id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -94,34 +127,11 @@ func (m *BleveIndexManager) DeleteSingleLogFromIndex(ctx context.Context, id str
 	return nil
 }
 
-func (m *BleveIndexManager) Search(ctx context.Context, q Query) (*SearchResult, error) {
-	searchQuery := bleve.NewConjunctionQuery()
+func (m *DiskIndexManager) Search(ctx context.Context, q Query) (*SearchResult, error) {
+	count, _ := m.index.DocCount()
+	println("index count (search):", count)
 
-	println(m.index.DocCount())
-
-	if q.Text != "" {
-		textQuery := bleve.NewMatchQuery(q.Text)
-		textQuery.SetField("line")
-		searchQuery.AddQuery(textQuery)
-	}
-
-	startAsFloat := float64(q.TimeRange.Start)
-	endAsFloat := float64(q.TimeRange.End)
-
-	if q.TimeRange.Start != 0 || q.TimeRange.End != 0 {
-		timeQuery := bleve.NewNumericRangeQuery(&startAsFloat, &endAsFloat)
-		timeQuery.SetField("timestamp")
-		searchQuery.AddQuery(timeQuery)
-	}
-
-	for key, value := range q.Filters {
-		termQuery := bleve.NewTermQuery(value)
-		termQuery.SetField(fmt.Sprintf("kv.%s", key))
-		searchQuery.AddQuery(termQuery)
-	}
-
-	searchRequest := bleve.NewSearchRequest(searchQuery)
-	searchRequest.Size = q.MaxResults
+	searchRequest := createSearchRequest(&q)
 
 	startTime := time.Now()
 	bleveResult, err := m.index.Search(searchRequest)
@@ -132,6 +142,7 @@ func (m *BleveIndexManager) Search(ctx context.Context, q Query) (*SearchResult,
 	result := &SearchResult{
 		Total:      int(bleveResult.Total),
 		SearchTime: time.Since(startTime).Milliseconds(),
+		Matches:    LogPositions{},
 	}
 
 	for _, hit := range bleveResult.Hits {
@@ -139,10 +150,21 @@ func (m *BleveIndexManager) Search(ctx context.Context, q Query) (*SearchResult,
 		result.Matches[logPosition.BatchPath] = append(result.Matches[logPosition.BatchPath], logPosition)
 	}
 
+	result.RetrievalTime = time.Since(startTime).Milliseconds()
+
 	return result, nil
 }
 
-func (m *BleveIndexManager) Close(ctx context.Context) error {
+func (m *DiskIndexManager) Size(ctx context.Context) uint64 {
+	size, err := m.index.DocCount()
+	if err != nil {
+		panic(err)
+	}
+
+	return size
+}
+
+func (m *DiskIndexManager) Close(ctx context.Context) error {
 	return m.index.Close()
 }
 

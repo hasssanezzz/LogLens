@@ -10,7 +10,6 @@ import (
 type LogPosition struct {
 	BatchPath string `json:"batch_path"`
 	Offset    int    `json:"offset"`
-	Size      int    `json:"size"`
 }
 
 type LogPositions map[string][]LogPosition // "batch_path" -> []LogPosition
@@ -20,6 +19,8 @@ type LogEntry struct {
 	KV        map[string]string `json:"kv"`
 	Line      string            `json:"line"`
 	position  LogPosition
+
+	// mu sync.Mutex
 }
 
 func NewLogEntry(kv map[string]string, message string) *LogEntry {
@@ -32,7 +33,7 @@ func NewLogEntry(kv map[string]string, message string) *LogEntry {
 
 func (l *LogEntry) Encode() ([]byte, error) {
 	var buff bytes.Buffer
-	if err := gob.NewEncoder(&buff).Encode(l); err != nil {
+	if err := gob.NewEncoder(&buff).Encode(*l); err != nil {
 		return nil, fmt.Errorf("gob can not serialize log: %v", err)
 	}
 	return buff.Bytes(), nil
@@ -45,3 +46,9 @@ func (l *LogEntry) GetTime() time.Time {
 func (l *LogEntry) Type() string {
 	return "log"
 }
+
+// func (l *LogEntry) SetPosition(p LogPosition) {
+// 	l.mu.Lock()
+// 	defer l.mu.Unlock()
+// 	l.position = p
+// }

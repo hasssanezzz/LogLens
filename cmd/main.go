@@ -74,21 +74,6 @@ func GenerateLogs(count int) []internal.LogEntry {
 	return logs
 }
 
-func IndexNLogs(idx internal.IndexManager, n int) {
-	logs := GenerateLogs(n)
-	println("generated logs of count:", len(logs))
-
-	bsize := 1000
-	for i := 0; i < n; i += bsize {
-		println(i)
-		err := idx.IndexBatch(context.Background(), logs[i:i+bsize])
-		if err != nil {
-			println("index error")
-			panic(err)
-		}
-	}
-}
-
 func Search(idx internal.IndexManager, q internal.Query) {
 	result, err := idx.Search(context.Background(), q)
 	if err != nil {

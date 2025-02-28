@@ -1,8 +1,11 @@
 .lens
+.lens-test
+__pycache__
 *.exe
 *.json
 *.jsonl
 *.ipynb
 arch.md
 generation
+cmd_temp
 *.py

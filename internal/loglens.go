@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	BufferThreshold = 200
+	BufferThreshold      = 1000
+	NumOfConsumerThreads = 8
 )
 
 type LogLensImpl struct {
@@ -20,7 +21,7 @@ type LogLensImpl struct {
 }
 
 func NewLogLens(homepath string) (LogLens, error) {
-	wal, err := NewDiskWAL(filepath.Join("wal"))
+	wal, err := NewDiskWAL(filepath.Join(homepath, "wal"))
 	if err != nil {
 		return nil, err
 	}
@@ -30,15 +31,35 @@ func NewLogLens(homepath string) (LogLens, error) {
 		return nil, err
 	}
 
-	storageManager := NewDiskStorageManager(homepath)
-	batchManager, err := NewBatchManager(storageManager)
+	batchManager, err := NewBatchManager(NewDiskStorageManager(homepath))
 	if err != nil {
 		return nil, err
 	}
 
+	walEntries, err := wal.Read(context.Background(), 1e5)
+	if err != nil {
+		return nil, err
+	}
+
+	buffer, err := NewLogBuffer()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range walEntries {
+		buffer.Add(context.Background(), &entry)
+	}
+
+	ctx := context.Background()
+	bufSize, indexSize := buffer.Size(ctx), indexManager.Size(ctx)
+
+	log.Println("log lens initiated, current buffer size:", bufSize)
+	log.Println("                    current index size: ", indexSize)
+	log.Println("                    all logs count:     ", uint64(bufSize)+indexSize)
+
 	lens := &LogLensImpl{
 		wal:          wal,
-		buffer:       NewLogBuffer(),
+		buffer:       buffer,
 		indexManager: indexManager,
 		batchManager: batchManager,
 	}
@@ -51,39 +72,25 @@ func (lens *LogLensImpl) FlushBuffer(ctx context.Context) error {
 	if lens.buffer.Size(ctx) <= 0 {
 		return nil
 	}
+
 	log.Println("triggering a buffer flush")
-
-	logs := lens.buffer.Flush(ctx)
-
-	// Create error channel to collect errors from goroutines
-	errChan := make(chan error, 1)
-
-	// Create a context that can be canceled
-	flushCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// Start the batch ingestion in a separate goroutine
-	go func() {
-		err := lens.IngestBatch(flushCtx, logs)
-		errChan <- err // Send nil or the error to channel
-	}()
-
-	// Wait for the result or context cancellation
-	select {
-	case err := <-errChan:
-		if err != nil {
-			return fmt.Errorf("failed to index batch when flushing: %v", err)
-		}
-		return nil
-	case <-ctx.Done():
-		// The parent context was canceled
-		return ctx.Err()
+	logs, err := lens.buffer.Flush(ctx)
+	if err != nil {
+		return err
 	}
+
+	if err := lens.IngestBatch(ctx, logs); err != nil {
+		return err
+	}
+
+	if err := lens.wal.Clear(ctx); err != nil {
+		log.Println("failed to clear the WAL:", err)
+	}
+
+	return nil
 }
 
 func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) error {
-	log.Println("ingesting a log with message:", entry.Line)
-
 	if lens.buffer.Size(ctx) >= BufferThreshold ||
 		!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) {
 		if err := lens.FlushBuffer(ctx); err != nil {
@@ -91,70 +98,58 @@ func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) error {
 		}
 	}
 
+	// add to the buffer
 	lens.buffer.Add(ctx, &entry)
-
-	// index the log
-	err := lens.indexManager.IndexLog(ctx, &entry)
-	if err != nil {
-		return fmt.Errorf("failed to index a log: %v", err)
+	if err := lens.wal.Append(ctx, entry); err != nil {
+		return fmt.Errorf("failed to append entry to WAL: %v", err)
 	}
 
 	return nil
 }
 
-func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []LogEntry) error {
-	var err error
-
-	// Step 1: Delete the past indexes
-	if err = lens.indexManager.DeleteFromIndex(ctx, logsToIds(logs)); err != nil {
-		return fmt.Errorf("failed to delete indexes when ingesting a batch: %v", err)
-	}
-
-	// Defer a function to undo the delete operation if any subsequent step fails
-	defer func() {
-		if err != nil {
-			// Re-index the deleted logs
-			if undoErr := lens.indexManager.IndexBatch(ctx, logs); undoErr != nil {
-				log.Printf("failed to undo delete operation: %v", undoErr)
-			}
-		}
-	}()
-
-	// Step 2: Create batch
-	batchPath, err := lens.batchManager.CreateBatch(ctx, logs)
+func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []*LogEntry) error {
+	// step 2: create a batch
+	println("before:", logs[0].position.BatchPath)
+	_, err := lens.batchManager.CreateBatch(ctx, logs)
 	if err != nil {
 		return fmt.Errorf("failed to create batch: %v", err)
 	}
+	println("after:", logs[0].position.BatchPath)
 
-	// Defer a function to delete the batch if any subsequent step fails
-	defer func() {
-		if err != nil {
-			if undoErr := lens.batchManager.DeleteBatch(ctx, batchPath); undoErr != nil {
-				log.Printf("failed to undo create batch operation: %v", undoErr)
-			}
-		}
-	}()
-
-	// Step 3: Update the index
-	if err = lens.indexManager.IndexBatch(ctx, logs); err != nil {
-		return fmt.Errorf("failed to index when ingesting a batch: %v", err)
-	}
+	// step 3: index the new logs
+	lens.indexManager.Consume(ctx, logs)
 
 	return nil
 }
 
 func (lens *LogLensImpl) Search(ctx context.Context, query Query) (*SearchResult, error) {
+	memResults, err := lens.buffer.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
 	results, err := lens.indexManager.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	logs, err := lens.batchManager.RetrieveLogs(ctx, results.Matches)
-	if err != nil {
-		return nil, err
+	for _, match := range results.Matches {
+		for _, position := range match {
+			if position.BatchPath == "" {
+				panic("something very bad just happened")
+			}
+		}
 	}
 
-	results.Logs = logs
+	logs, err := lens.batchManager.RetrieveLogs(ctx, results.Matches)
+	if err != nil {
+		return nil, fmt.Errorf("loglens failed to retrieve logs from the batch manager: %v", err)
+	}
+
+	results.Total += memResults.Total
+	results.SearchTime += memResults.SearchTime
+	results.RetrievalTime += memResults.RetrievalTime
+	results.Logs = append(logs, memResults.Logs...)
 	return results, nil
 }
 
