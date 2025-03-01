@@ -14,7 +14,6 @@ type LogLens interface {
 	Search(ctx context.Context, query Query) (*SearchResult, error)
 
 	// Maintenance
-	ForceFlush(ctx context.Context) error
 	Cleanup(ctx context.Context, retentionDays int) (CleanupReport, error)
 	Stats(ctx context.Context) (SystemStats, error)
 
@@ -27,7 +26,6 @@ type IndexManager interface {
 	Consume(ctx context.Context, batch []*LogEntry)
 	Search(ctx context.Context, query Query) (*SearchResult, error)
 	DeleteFromIndex(ctx context.Context, ids []string) error
-	DeleteSingleLogFromIndex(ctx context.Context, id string) error
 	Size(ctx context.Context) uint64
 	Close(ctx context.Context) error
 }

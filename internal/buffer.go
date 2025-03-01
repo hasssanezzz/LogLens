@@ -3,7 +3,9 @@ package internal
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
+	"time"
 )
 
 type MemoryLogBuffer struct {
@@ -27,8 +29,14 @@ func NewLogBuffer() (LogBuffer, error) {
 }
 
 func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
-	lb.mu.RLock()
-	defer lb.mu.RUnlock()
+	start := time.Now()
+	defer func() {
+		s := time.Since(start).Milliseconds()
+		log.Printf("[Add] Buffer.Add took: %d\n", s)
+	}()
+
+	// lb.mu.RLock()
+	// defer lb.mu.RUnlock()
 
 	// track the latest entry timestamp
 	if entry.Timestamp > lb.latestEntryTimestamp {
@@ -85,6 +93,11 @@ func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResu
 }
 
 func (lb *MemoryLogBuffer) Flush(ctx context.Context) ([]*LogEntry, error) {
+	start := time.Now()
+	defer func() {
+		log.Printf("[TIME] Buffer.Flush took: %d\n", time.Since(start).Milliseconds())
+	}()
+
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 

@@ -56,30 +56,21 @@ func (m *DiskIndexManager) Listen(ctx context.Context) {
 }
 
 func (m *DiskIndexManager) Consume(ctx context.Context, batch []*LogEntry) {
-	println("[batch c]", len(m.consumeBatchChan))
 	m.consumeBatchChan <- batch
 }
 
-func (m *DiskIndexManager) IndexLog(ctx context.Context, log *LogEntry) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	id := positionToId(&log.position)
-	if err := m.index.Index(id, log); err != nil {
-		errString := fmt.Sprintf("failed to index log %s: %v", id, err)
-		glog.Println(errString)
-		return err
-	}
-	return nil
-}
-
 func (m *DiskIndexManager) IndexBatch(ctx context.Context, batch []*LogEntry) error {
+	start := time.Now()
+	defer func() {
+		log.Printf("[TIME] indexManager.IndexBatch took: %d\n", time.Since(start).Milliseconds())
+	}()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	log.Println("indexing a batch...")
 
-	start := time.Now()
+	start = time.Now()
 
 	b := m.index.NewBatch()
 	for _, log := range batch {
