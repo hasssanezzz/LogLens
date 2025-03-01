@@ -4,7 +4,6 @@ go 1.22.1
 
 require (
 	github.com/blevesearch/bleve/v2 v2.4.4
-	github.com/google/uuid v1.6.0
 	github.com/klauspost/compress v1.17.11
 )
 

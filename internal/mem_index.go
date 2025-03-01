@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/blevesearch/bleve/v2"
@@ -10,6 +11,7 @@ import (
 
 type MemoryIndexManagerImpl struct {
 	index bleve.Index
+	mu    sync.Mutex
 }
 
 func NewMemoryIndexManager() (InMemoryIndexManager, error) {
@@ -33,10 +35,27 @@ func (m *MemoryIndexManagerImpl) newInMemIndex() error {
 }
 
 func (m *MemoryIndexManagerImpl) Index(ctx context.Context, entry *LogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	id := positionToId(&entry.position)
 	if err := m.index.Index(id, entry); err != nil {
 		return fmt.Errorf("failed to index log %s: %v", id, err)
 	}
+	return nil
+}
+
+func (m *MemoryIndexManagerImpl) IndexBatch(ctx context.Context, batch []*LogEntry) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	b := m.index.NewBatch()
+	for _, entry := range batch {
+		if err := b.Index(positionToId(&entry.position), entry); err != nil {
+			return fmt.Errorf("failed to index log: %v", err)
+		}
+	}
+
 	return nil
 }
 

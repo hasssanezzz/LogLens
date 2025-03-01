@@ -32,6 +32,7 @@ type IndexManager interface {
 
 type InMemoryIndexManager interface {
 	Index(context.Context, *LogEntry) error
+	IndexBatch(context.Context, []*LogEntry) error
 	Search(context.Context, Query) (*SearchResult, error)
 	Size(context.Context) uint64
 	Clear(context.Context) error

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sync"
-	"time"
 )
 
 type MemoryLogBuffer struct {
@@ -29,14 +28,14 @@ func NewLogBuffer() (LogBuffer, error) {
 }
 
 func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
-	start := time.Now()
-	defer func() {
-		s := time.Since(start).Milliseconds()
-		log.Printf("[Add] Buffer.Add took: %d\n", s)
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	s := time.Since(start).Milliseconds()
+	// 	log.Printf("[Add] Buffer.Add took: %d\n", s)
+	// }()
 
-	// lb.mu.RLock()
-	// defer lb.mu.RUnlock()
+	lb.mu.Lock()
+	defer lb.mu.Unlock()
 
 	// track the latest entry timestamp
 	if entry.Timestamp > lb.latestEntryTimestamp {
@@ -52,23 +51,18 @@ func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
 	// fmt.Println("[ADDED]", entry.Timestamp, entry.position)
 
 	// index the log
-	err := lb.index.Index(ctx, entry)
-	if err != nil {
-		panic(err) // FOR NOW
+	if len(lb.logs) >= 750 && len(lb.logs)%750 == 0 {
+		err := lb.index.IndexBatch(ctx, lb.logs)
+		if err != nil {
+			panic(err) // FOR NOW
+		}
+		log.Println("completed a periodic buffer index successfully")
 	}
-}
-
-func (lb *MemoryLogBuffer) getByIndex(ctx context.Context, index int) (*LogEntry, error) {
-	if index >= len(lb.logs) {
-		return nil, fmt.Errorf("memory buffer trying to access index out of range (len: %d i: %d)", lb.Size(ctx), index)
-	}
-
-	return lb.logs[index], nil
 }
 
 func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResult, error) {
-	lb.mu.Lock()
-	defer lb.mu.Unlock()
+	lb.mu.RLock()
+	defer lb.mu.RUnlock()
 
 	results, err := lb.index.Search(ctx, query)
 	if err != nil {
@@ -81,8 +75,6 @@ func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResu
 			entry, err := lb.getByIndex(ctx, position.Offset)
 			if err != nil {
 				panic(err)
-				// log.Println(err)
-				// continue
 			}
 			logsFromBuffer = append(logsFromBuffer, *entry)
 		}
@@ -93,11 +85,6 @@ func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResu
 }
 
 func (lb *MemoryLogBuffer) Flush(ctx context.Context) ([]*LogEntry, error) {
-	start := time.Now()
-	defer func() {
-		log.Printf("[TIME] Buffer.Flush took: %d\n", time.Since(start).Milliseconds())
-	}()
-
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
@@ -106,6 +93,8 @@ func (lb *MemoryLogBuffer) Flush(ctx context.Context) ([]*LogEntry, error) {
 
 	// clear the buffer
 	lb.logs = []*LogEntry{}
+
+	// clear the index
 	if err := lb.index.Clear(ctx); err != nil {
 		return nil, err
 	}
@@ -115,14 +104,22 @@ func (lb *MemoryLogBuffer) Flush(ctx context.Context) ([]*LogEntry, error) {
 
 func (lb *MemoryLogBuffer) LatestEntryTimestamp(ctx context.Context) int64 {
 	lb.mu.RLock()
-	lb.mu.RUnlock()
+	defer lb.mu.RUnlock()
 
 	return lb.latestEntryTimestamp
 }
 
 func (lb *MemoryLogBuffer) Size(ctx context.Context) int {
 	lb.mu.RLock()
-	lb.mu.RUnlock()
+	defer lb.mu.RUnlock()
 
 	return len(lb.logs)
+}
+
+func (lb *MemoryLogBuffer) getByIndex(ctx context.Context, index int) (*LogEntry, error) {
+	if index >= len(lb.logs) {
+		return nil, fmt.Errorf("memory buffer trying to access index out of range (len: %d i: %d)", lb.Size(ctx), index)
+	}
+
+	return lb.logs[index], nil
 }

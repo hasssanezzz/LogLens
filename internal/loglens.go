@@ -5,11 +5,10 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"time"
 )
 
 const (
-	BufferThreshold          = 500
+	BufferThreshold          = 2000
 	RetentionThresholdInDays = 100
 )
 
@@ -92,13 +91,13 @@ func (lens *LogLensImpl) FlushBuffer(ctx context.Context) error {
 }
 
 func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) error {
-	start := time.Now()
-	defer func() {
-		s := time.Since(start).Milliseconds()
-		if s >= 1000 {
-			log.Printf("[TIME] LogLens.Ingest took: %d\n", s)
-		}
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	s := time.Since(start).Milliseconds()
+	// 	if s >= 1000 {
+	// 		log.Printf("[TIME] LogLens.Ingest took: %d\n", s)
+	// 	}
+	// }()
 
 	if lens.buffer.Size(ctx) >= BufferThreshold ||
 		!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) {
@@ -107,22 +106,20 @@ func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) error {
 		}
 	}
 
-	s1 := time.Now()
 	// add to the buffer
 	lens.buffer.Add(ctx, &entry)
 	if err := lens.wal.Append(ctx, entry); err != nil {
 		return fmt.Errorf("failed to append entry to WAL: %v", err)
 	}
-	log.Println("\t[ADD_TIME]:", time.Since(s1).Milliseconds())
 
 	return nil
 }
 
 func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []*LogEntry) error {
-	start := time.Now()
-	defer func() {
-		log.Printf("[TIME] LogLens.IngestBatch took: %d\n", time.Since(start).Milliseconds())
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	log.Printf("[TIME] LogLens.IngestBatch took: %d\n", time.Since(start).Milliseconds())
+	// }()
 
 	// step 2: create a batch
 	_, err := lens.batchManager.CreateBatch(ctx, logs)

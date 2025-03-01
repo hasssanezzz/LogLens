@@ -60,17 +60,17 @@ func (m *DiskIndexManager) Consume(ctx context.Context, batch []*LogEntry) {
 }
 
 func (m *DiskIndexManager) IndexBatch(ctx context.Context, batch []*LogEntry) error {
-	start := time.Now()
-	defer func() {
-		log.Printf("[TIME] indexManager.IndexBatch took: %d\n", time.Since(start).Milliseconds())
-	}()
+	// start := time.Now()
+	// defer func() {
+	// 	log.Printf("[TIME] indexManager.IndexBatch took: %d\n", time.Since(start).Milliseconds())
+	// }()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	log.Println("indexing a batch...")
 
-	start = time.Now()
+	start := time.Now()
 
 	b := m.index.NewBatch()
 	for _, log := range batch {

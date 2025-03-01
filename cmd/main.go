@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	api, err := api.New("./.lens/ground-1")
+	api, err := api.New("./.lens/2")
 	if err != nil {
 		panic(err)
 	}
@@ -18,7 +18,7 @@ func main() {
 	api.SetupRoutes(mux)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    ":3000",
 		Handler: mux,
 	}
 

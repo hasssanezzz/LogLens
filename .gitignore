@@ -5,8 +5,6 @@ __pycache__
 *.json
 *.jsonl
 *.ipynb
-*.txt
 arch.md
 generation
 cmd_temp
-*.py
