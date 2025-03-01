@@ -1,7 +1,3 @@
-Here’s your README rewritten in peak Gen Z brain rot mode. 🤡💀  
-
----
-
 # **LogLens: The Log Gobbler™** 🚀🔥  
 
 Bro, your logs are **out of control**? You need **LogLens**, the **lightest, fastest, most sigma log system** out there. 🚀 **It eats logs for breakfast** and spits out **searchable magic.**  
