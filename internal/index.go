@@ -110,9 +110,6 @@ func (m *DiskIndexManager) DeleteSingleLogFromIndex(ctx context.Context, id stri
 }
 
 func (m *DiskIndexManager) Search(ctx context.Context, q Query) (*SearchResult, error) {
-	count, _ := m.index.DocCount()
-	println("index count (search):", count)
-
 	searchRequest := createSearchRequest(&q)
 
 	startTime := time.Now()

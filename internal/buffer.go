@@ -53,7 +53,7 @@ func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
 		if err != nil {
 			panic(err) // FOR NOW
 		}
-		log.Printf("completed a periodic buffer index successfully in: %dms", time.Since(start).Milliseconds())
+		log.Printf("[periodic buffer index flush] %d in %dms", currLen, time.Since(start).Milliseconds())
 	}
 }
 

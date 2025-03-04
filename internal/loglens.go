@@ -10,6 +10,7 @@ import (
 
 const (
 	BufferThreshold          = 2000
+	BufferChanSize           = BufferThreshold * 3
 	TemporalIndexBatchSize   = BufferThreshold / 3
 	RetentionThresholdInDays = 100
 )
@@ -65,7 +66,7 @@ func NewLogLens(homepath string) (LogLens, error) {
 		indexManager: indexManager,
 		batchManager: batchManager,
 		startDate:    time.Now().UnixMilli(),
-		entryChan:    make(chan LogEntry, BufferThreshold),
+		entryChan:    make(chan LogEntry, BufferChanSize),
 	}
 
 	log.Println("[LOGLENS INITIATED]")
@@ -76,7 +77,7 @@ func NewLogLens(homepath string) (LogLens, error) {
 	log.Println("all logs count:     ", stats.IngestedLogs)
 	log.Println("=====================")
 
-	go lens.consumeBuffer()
+	go lens.consumeLogsFromChan()
 
 	return lens, nil
 }
@@ -94,18 +95,11 @@ func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) {
 }
 
 func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []*LogEntry) error {
-	start := time.Now()
-	defer func() {
-		log.Printf("[Loglens.IngestBatch] size: %d time: %dms\n", len(logs), time.Since(start).Milliseconds())
-	}()
-
-	// step 1: create a batch
 	_, err := lens.batchManager.CreateBatch(ctx, logs)
 	if err != nil {
 		return fmt.Errorf("failed to create batch: %v", err)
 	}
 
-	// step 2: index the new logs
 	lens.indexManager.Consume(ctx, logs)
 
 	return nil
@@ -165,7 +159,17 @@ func (lens *LogLensImpl) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-func (lens *LogLensImpl) consumeBuffer() {
+func (lens *LogLensImpl) consumeLogsFromChan() {
+	go func() {
+		for {
+			time.Sleep(1 * time.Second)
+			l := len(lens.entryChan)
+			if l > 0 {
+				log.Println("buffen channel size:", l)
+			}
+		}
+	}()
+
 	for entry := range lens.entryChan {
 		ctx := context.Background()
 
@@ -192,7 +196,7 @@ func (lens *LogLensImpl) flushBuffer() error {
 
 	// panic if buffer is empty
 	if lens.buffer.Size(ctx) <= 10 {
-		panic("something wrong here")
+		panic("something went wrong here")
 	}
 
 	log.Println("triggering a buffer flush, SIZE:", lens.buffer.Size(ctx))
