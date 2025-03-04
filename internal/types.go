@@ -1,7 +1,5 @@
 package internal
 
-import "time"
-
 type Query struct {
 	Text       string            `json:"text"`        // Full-text search
 	Filters    map[string]string `json:"filters"`     // Label filters
@@ -33,10 +31,10 @@ type RetentionStats struct {
 }
 
 type SystemStats struct {
-	IngestedLogs  int64         `json:"ingestedLogs"`
-	ActiveBatches int           `json:"activeBatches"`
-	StorageUsedMB float64       `json:"storageUsedMB"`
-	Uptime        time.Duration `json:"uptime"`
-	QueueSize     int           `json:"queueSize"`
-	IndexSizeMB   float64       `json:"indexSizeMB"`
+	IngestedLogs  int64   `json:"ingestedLogs"`
+	IndexSize     uint64  `json:"indexSize"`
+	BufferSize    int     `json:"bufferSize"`
+	UptimeMS      int64   `json:"uptime"`
+	ActiveBatches int     `json:"activeBatches"`
+	StorageUsedMB float64 `json:"storageUsedMB"`
 }

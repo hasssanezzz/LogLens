@@ -5,22 +5,31 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
+	"time"
 )
 
 const (
 	BufferThreshold          = 2000
+	TemporalIndexBatchSize   = BufferThreshold / 3
 	RetentionThresholdInDays = 100
 )
 
 type LogLensImpl struct {
+	// subcomponents
 	batchManager     BatchManager
 	buffer           LogBuffer
 	wal              WAL
 	retentionManager RetentionManager
 	indexManager     IndexManager
+
+	// attributes
+	startDate int64
+	entryChan chan LogEntry
 }
 
 func NewLogLens(homepath string) (LogLens, error) {
+	ctx := context.Background()
+
 	wal, err := NewDiskWAL(filepath.Join(homepath, "wal"))
 	if err != nil {
 		return nil, err
@@ -36,98 +45,67 @@ func NewLogLens(homepath string) (LogLens, error) {
 		return nil, err
 	}
 
-	walEntries, err := wal.Read(context.Background(), 1e5)
-	if err != nil {
-		return nil, err
-	}
-
 	buffer, err := NewLogBuffer()
 	if err != nil {
 		return nil, err
 	}
 
-	for _, entry := range walEntries {
-		buffer.Add(context.Background(), &entry)
+	walEntries, err := wal.Read(ctx, 1e5)
+	if err != nil {
+		return nil, err
 	}
 
-	ctx := context.Background()
-	bufSize, indexSize := buffer.Size(ctx), indexManager.Size(ctx)
-
-	log.Println("log lens initiated, current buffer size:", bufSize)
-	log.Println("                    current index size: ", indexSize)
-	log.Println("                    all logs count:     ", uint64(bufSize)+indexSize)
+	for _, entry := range walEntries {
+		buffer.Add(ctx, &entry)
+	}
 
 	lens := &LogLensImpl{
 		wal:          wal,
 		buffer:       buffer,
 		indexManager: indexManager,
 		batchManager: batchManager,
+		startDate:    time.Now().UnixMilli(),
+		entryChan:    make(chan LogEntry, BufferThreshold),
 	}
+
+	log.Println("[LOGLENS INITIATED]")
+	stats, _ := lens.Stats(ctx)
+	log.Println(stats)
+	log.Println("current buffer size:", stats.BufferSize)
+	log.Println("current index size: ", stats.IndexSize)
+	log.Println("all logs count:     ", stats.IngestedLogs)
+	log.Println("=====================")
+
+	go lens.consumeBuffer()
 
 	return lens, nil
 }
 
-func (lens *LogLensImpl) FlushBuffer(ctx context.Context) error {
-	// ignore if buffer is empty
-	if lens.buffer.Size(ctx) <= 0 {
-		return nil
-	}
-
-	log.Println("triggering a buffer flush")
-	logs, err := lens.buffer.Flush(ctx)
-	if err != nil {
-		return err
-	}
-
-	if err := lens.IngestBatch(ctx, logs); err != nil {
-		return err
-	}
-
-	if err := lens.wal.Clear(ctx); err != nil {
-		log.Println("failed to clear the WAL:", err)
-	}
-
-	return nil
-}
-
-func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) error {
-	// start := time.Now()
-	// defer func() {
-	// 	s := time.Since(start).Milliseconds()
-	// 	if s >= 1000 {
-	// 		log.Printf("[TIME] LogLens.Ingest took: %d\n", s)
-	// 	}
-	// }()
-
-	if lens.buffer.Size(ctx) >= BufferThreshold ||
-		!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) {
-		if err := lens.FlushBuffer(ctx); err != nil {
-			return err
+func (lens *LogLensImpl) Ingest(ctx context.Context, entry LogEntry) {
+	start := time.Now()
+	defer func() {
+		s := time.Since(start).Milliseconds()
+		if s >= 1000 && lens.buffer.Size(ctx)%100 == 0 {
+			log.Printf("[LogLens.Ingest] %dms\n", s)
 		}
-	}
+	}()
 
-	// add to the buffer
-	lens.buffer.Add(ctx, &entry)
-	if err := lens.wal.Append(ctx, entry); err != nil {
-		return fmt.Errorf("failed to append entry to WAL: %v", err)
-	}
-
-	return nil
+	lens.entryChan <- entry
 }
 
 func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []*LogEntry) error {
-	// start := time.Now()
-	// defer func() {
-	// 	log.Printf("[TIME] LogLens.IngestBatch took: %d\n", time.Since(start).Milliseconds())
-	// }()
+	start := time.Now()
+	defer func() {
+		log.Printf("[Loglens.IngestBatch] size: %d time: %dms\n", len(logs), time.Since(start).Milliseconds())
+	}()
 
-	// step 2: create a batch
+	// step 1: create a batch
 	_, err := lens.batchManager.CreateBatch(ctx, logs)
 	if err != nil {
 		return fmt.Errorf("failed to create batch: %v", err)
 	}
 
-	// step 3: index the new logs
+	// step 2: index the new logs
 	lens.indexManager.Consume(ctx, logs)
 
 	return nil
@@ -170,10 +148,69 @@ func (lens *LogLensImpl) Cleanup(ctx context.Context, retentionDays int) (Cleanu
 }
 
 func (lens *LogLensImpl) Stats(ctx context.Context) (SystemStats, error) {
-	return SystemStats{}, nil
+	bufferSize := lens.buffer.Size(ctx)
+	indexSize := lens.indexManager.Size(ctx)
+	return SystemStats{
+		IngestedLogs:  int64(bufferSize) + int64(indexSize),
+		IndexSize:     indexSize,
+		BufferSize:    bufferSize,
+		UptimeMS:      time.Now().UnixMilli() - lens.startDate,
+		ActiveBatches: 0,
+		StorageUsedMB: 0,
+	}, nil
 }
 
 // Lifecycle
 func (lens *LogLensImpl) Shutdown(ctx context.Context) error {
+	return nil
+}
+
+func (lens *LogLensImpl) consumeBuffer() {
+	for entry := range lens.entryChan {
+		ctx := context.Background()
+
+		if lens.buffer.Size(ctx) >= BufferThreshold ||
+			(!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) &&
+				lens.buffer.LatestEntryTimestamp(ctx) != 0 &&
+				lens.buffer.Size(ctx) > 0) {
+			if err := lens.flushBuffer(); err != nil {
+				panic(err)
+			}
+		}
+
+		// add to the buffer
+		lens.buffer.Add(ctx, &entry)
+		if err := lens.wal.Append(ctx, entry); err != nil {
+			err = fmt.Errorf("failed to append entry to WAL: %v", err)
+			log.Println(err)
+		}
+	}
+}
+
+func (lens *LogLensImpl) flushBuffer() error {
+	ctx := context.Background()
+
+	// panic if buffer is empty
+	if lens.buffer.Size(ctx) <= 10 {
+		panic("something wrong here")
+	}
+
+	log.Println("triggering a buffer flush, SIZE:", lens.buffer.Size(ctx))
+
+	// TODO: make these operations atomic
+
+	logs, err := lens.buffer.Flush(ctx)
+	if err != nil {
+		return err
+	}
+
+	if err := lens.IngestBatch(ctx, logs); err != nil {
+		return err
+	}
+
+	if err := lens.wal.Clear(ctx); err != nil {
+		log.Println("failed to clear the WAL:", err)
+	}
+
 	return nil
 }

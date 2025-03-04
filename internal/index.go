@@ -15,7 +15,6 @@ import (
 const ChanSize = 1000
 
 type DiskIndexManager struct {
-	consumeLogChan   chan *LogEntry
 	consumeBatchChan chan []*LogEntry
 	index            bleve.Index
 	mu               sync.RWMutex
@@ -35,7 +34,6 @@ func NewBleveIndexManager(indexPath string) (IndexManager, error) {
 
 	m := &DiskIndexManager{
 		index:            index,
-		consumeLogChan:   make(chan *LogEntry, ChanSize),
 		consumeBatchChan: make(chan []*LogEntry, ChanSize),
 	}
 
@@ -46,11 +44,9 @@ func NewBleveIndexManager(indexPath string) (IndexManager, error) {
 
 func (m *DiskIndexManager) Listen(ctx context.Context) {
 	for {
-		select {
-		case batch := <-m.consumeBatchChan:
-			if err := m.IndexBatch(ctx, batch); err != nil {
-				glog.Printf("failed to index a batch: %v\n", err)
-			}
+		batch := <-m.consumeBatchChan
+		if err := m.IndexBatch(ctx, batch); err != nil {
+			glog.Printf("failed to index a batch: %v\n", err)
 		}
 	}
 }
@@ -60,17 +56,13 @@ func (m *DiskIndexManager) Consume(ctx context.Context, batch []*LogEntry) {
 }
 
 func (m *DiskIndexManager) IndexBatch(ctx context.Context, batch []*LogEntry) error {
-	// start := time.Now()
-	// defer func() {
-	// 	log.Printf("[TIME] indexManager.IndexBatch took: %d\n", time.Since(start).Milliseconds())
-	// }()
+	start := time.Now()
+	defer func() {
+		log.Printf("[indexManager.IndexBatch] batch of size %d in %dms", len(batch), time.Since(start).Milliseconds())
+	}()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	log.Println("indexing a batch...")
-
-	start := time.Now()
 
 	b := m.index.NewBatch()
 	for _, log := range batch {
@@ -86,7 +78,6 @@ func (m *DiskIndexManager) IndexBatch(ctx context.Context, batch []*LogEntry) er
 		return fmt.Errorf("failed to index batch: %v", err)
 	}
 
-	log.Printf("batch indexing took %f seconds", time.Since(start).Seconds())
 	return nil
 }
 

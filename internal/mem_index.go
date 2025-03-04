@@ -56,6 +56,10 @@ func (m *MemoryIndexManagerImpl) IndexBatch(ctx context.Context, batch []*LogEnt
 		}
 	}
 
+	if err := m.index.Batch(b); err != nil {
+		return fmt.Errorf("failed to index batch: %v", err)
+	}
+
 	return nil
 }
 

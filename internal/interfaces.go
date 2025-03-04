@@ -7,7 +7,7 @@ import (
 
 type LogLens interface {
 	// Ingestion
-	Ingest(ctx context.Context, log LogEntry) error
+	Ingest(ctx context.Context, log LogEntry)
 	IngestBatch(ctx context.Context, logs []*LogEntry) error
 
 	// Query
@@ -62,7 +62,8 @@ type BatchManager interface {
 
 type LogBuffer interface {
 	Add(ctx context.Context, entry *LogEntry)
-	Search(context.Context, Query) (*SearchResult, error)
+	AddBuffer(ctx context.Context, batch []*LogEntry)
+	Search(ctx context.Context, q Query) (*SearchResult, error)
 	Flush(ctx context.Context) ([]*LogEntry, error)
 	LatestEntryTimestamp(ctx context.Context) int64
 	Size(ctx context.Context) int

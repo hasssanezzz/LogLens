@@ -4,12 +4,23 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 
 	"github.com/hasssanezzz/try-bleve/cmd/api"
 )
 
+func parseArgs() (string, string) {
+	if len(os.Args) < 3 {
+		panic("no enough arguments passes, required: (addr, homepath)")
+	}
+
+	return os.Args[1], os.Args[2]
+}
+
 func main() {
-	api, err := api.New("./.lens/2")
+	addr, homepath := parseArgs()
+
+	api, err := api.New(homepath)
 	if err != nil {
 		panic(err)
 	}
@@ -18,7 +29,7 @@ func main() {
 	api.SetupRoutes(mux)
 
 	server := &http.Server{
-		Addr:    ":3000",
+		Addr:    addr,
 		Handler: mux,
 	}
 

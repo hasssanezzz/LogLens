@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	glog "log"
-	"sort"
 	"sync"
 
 	z "github.com/klauspost/compress/zstd"
@@ -47,10 +46,6 @@ func (m *BatchManagerImpl) CreateBatch(ctx context.Context, logs []*LogEntry) (s
 	if len(logs) == 0 {
 		return "", fmt.Errorf("cannot create block with zero logs")
 	}
-
-	sort.Slice(logs, func(i, j int) bool {
-		return logs[i].Timestamp > logs[j].Timestamp
-	})
 
 	var (
 		positions  = make([]LogPosition, len(logs))

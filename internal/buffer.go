@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 type MemoryLogBuffer struct {
@@ -28,12 +29,6 @@ func NewLogBuffer() (LogBuffer, error) {
 }
 
 func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
-	// start := time.Now()
-	// defer func() {
-	// 	s := time.Since(start).Milliseconds()
-	// 	log.Printf("[Add] Buffer.Add took: %d\n", s)
-	// }()
-
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 
@@ -48,16 +43,22 @@ func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
 	// append to the buffer
 	lb.logs = append(lb.logs, entry)
 
-	// fmt.Println("[ADDED]", entry.Timestamp, entry.position)
-
 	// index the log
-	if len(lb.logs) >= 750 && len(lb.logs)%750 == 0 {
-		err := lb.index.IndexBatch(ctx, lb.logs)
+	currLen := len(lb.logs)
+	if currLen >= TemporalIndexBatchSize && currLen%TemporalIndexBatchSize == 0 {
+		start := time.Now()
+		// index only the last #TemporalIndexBatchSize elements
+		logsToIndex := lb.logs[currLen-TemporalIndexBatchSize:]
+		err := lb.index.IndexBatch(ctx, logsToIndex)
 		if err != nil {
 			panic(err) // FOR NOW
 		}
-		log.Println("completed a periodic buffer index successfully")
+		log.Printf("completed a periodic buffer index successfully in: %dms", time.Since(start).Milliseconds())
 	}
+}
+
+func (lb *MemoryLogBuffer) AddBuffer(ctx context.Context, batch []*LogEntry) {
+	panic("unimplemented")
 }
 
 func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResult, error) {
@@ -93,6 +94,7 @@ func (lb *MemoryLogBuffer) Flush(ctx context.Context) ([]*LogEntry, error) {
 
 	// clear the buffer
 	lb.logs = []*LogEntry{}
+	lb.latestEntryTimestamp = 0
 
 	// clear the index
 	if err := lb.index.Clear(ctx); err != nil {
