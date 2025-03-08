@@ -50,14 +50,15 @@ type StorageManager interface {
 	WriteBatch(ctx context.Context, path string, data []byte) (string, error)
 	GenerateBatchPath(ctx context.Context, start time.Time, end time.Time) string
 	ReadBatch(ctx context.Context, path string) ([]byte, error)
-	DeleteBatch(ctx context.Context, batchPath string) error
+	ReadFirstNBytesFromBatch(ctx context.Context, path string, n uint32) ([]byte, error)
+	DeleteBatch(ctx context.Context, batchPath string) (int64, error)
 }
 
 type BatchManager interface {
 	CreateBatch(ctx context.Context, logs []*LogEntry) (string, error)
 	RetrieveLogs(ctx context.Context, positions LogPositions) ([]LogEntry, error)
 	ReadBatchEntries(ctx context.Context, batchPath string, positions []LogPosition) ([]LogEntry, error)
-	DeleteBatch(ctx context.Context, batchPath string) error
+	DeleteBatch(ctx context.Context, batchPath string) (int64, error)
 }
 
 type LogBuffer interface {
@@ -70,6 +71,7 @@ type LogBuffer interface {
 }
 
 type RetentionManager interface {
-	Run(ctx context.Context, retentionDays int) (CleanupReport, error)
+	Run(ctx context.Context)
+	Scan(ctx context.Context) (CleanupReport, error)
 	Stats(ctx context.Context) RetentionStats
 }

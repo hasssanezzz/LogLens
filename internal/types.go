@@ -4,7 +4,7 @@ type Query struct {
 	Text       string            `json:"text"`        // Full-text search
 	Filters    map[string]string `json:"filters"`     // Label filters
 	TimeRange  TimeWindow        `json:"time_range"`  // [Start, End]
-	MaxResults int               `json:"max_results"` // Pagination
+	MaxResults int64             `json:"max_results"` // Pagination
 }
 
 type TimeWindow struct {
@@ -21,9 +21,9 @@ type SearchResult struct {
 }
 
 type CleanupReport struct {
-	DeletedBatches int `json:"deletedBatches"`
-	DeletedLogs    int `json:"deletedLogs"`
-	FreedSpaceMB   int `json:"freedSpaceMB"`
+	DeletedBatches int     `json:"deletedBatches"`
+	DeletedLogs    int     `json:"deletedLogs"`
+	FreedSpaceMB   float32 `json:"freedSpaceMB"`
 }
 
 type RetentionStats struct {

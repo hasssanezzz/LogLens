@@ -41,7 +41,8 @@ func NewLogLens(homepath string) (LogLens, error) {
 		return nil, err
 	}
 
-	batchManager, err := NewBatchManager(NewDiskStorageManager(homepath))
+	storage := NewDiskStorageManager(homepath)
+	batchManager, err := NewBatchManager(storage)
 	if err != nil {
 		return nil, err
 	}
@@ -50,6 +51,8 @@ func NewLogLens(homepath string) (LogLens, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	retentionManager := NewDiskRetentionManager(storage, indexManager)
 
 	walEntries, err := wal.Read(ctx, 1e5)
 	if err != nil {
@@ -61,12 +64,13 @@ func NewLogLens(homepath string) (LogLens, error) {
 	}
 
 	lens := &LogLensImpl{
-		wal:          wal,
-		buffer:       buffer,
-		indexManager: indexManager,
-		batchManager: batchManager,
-		startDate:    time.Now().UnixMilli(),
-		entryChan:    make(chan LogEntry, BufferChanSize),
+		wal:              wal,
+		buffer:           buffer,
+		indexManager:     indexManager,
+		batchManager:     batchManager,
+		startDate:        time.Now().UnixMilli(),
+		entryChan:        make(chan LogEntry, BufferChanSize),
+		retentionManager: retentionManager,
 	}
 
 	log.Println("[LOGLENS INITIATED]")
@@ -78,6 +82,7 @@ func NewLogLens(homepath string) (LogLens, error) {
 	log.Println("=====================")
 
 	go lens.consumeLogsFromChan()
+	go retentionManager.Run(ctx)
 
 	return lens, nil
 }
@@ -177,6 +182,7 @@ func (lens *LogLensImpl) consumeLogsFromChan() {
 			(!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) &&
 				lens.buffer.LatestEntryTimestamp(ctx) != 0 &&
 				lens.buffer.Size(ctx) > 0) {
+			println("flushing the buffer with length:", lens.buffer.Size(ctx))
 			if err := lens.flushBuffer(); err != nil {
 				panic(err)
 			}
@@ -195,7 +201,7 @@ func (lens *LogLensImpl) flushBuffer() error {
 	ctx := context.Background()
 
 	// panic if buffer is empty
-	if lens.buffer.Size(ctx) <= 10 {
+	if lens.buffer.Size(ctx) <= 0 {
 		panic("something went wrong here")
 	}
 

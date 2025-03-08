@@ -55,6 +55,13 @@ func (m *BatchManagerImpl) CreateBatch(ctx context.Context, logs []*LogEntry) (s
 
 	path := m.storage.GenerateBatchPath(ctx, logs[0].GetTime(), logs[len(logs)-1].GetTime())
 
+	// write the magic (4B)
+	buffer.Write([]byte("LENS"))
+	// write the batch format version
+	buffer.Write([]byte{0})
+	// write batch length (4B)
+	buffer.Write(binary.LittleEndian.AppendUint32(nil, uint32(len(logs))))
+
 	for i, log := range logs {
 		serializedLog, err := log.Encode()
 		if err != nil {
@@ -76,8 +83,9 @@ func (m *BatchManagerImpl) CreateBatch(ctx context.Context, logs []*LogEntry) (s
 		currOffset += 1
 	}
 
-	compressedData := m.encoder.EncodeAll(buffer.Bytes(), nil)
-	_, err := m.storage.WriteBatch(ctx, path, compressedData)
+	bufferBytes := buffer.Bytes()
+	compressedData := m.encoder.EncodeAll(bufferBytes[BatchHeaderSize:], nil)
+	_, err := m.storage.WriteBatch(ctx, path, append(bufferBytes[:BatchHeaderSize], compressedData...))
 	if err != nil {
 		return "", fmt.Errorf("can not write batch data to disk: %v", err)
 	}
@@ -103,13 +111,22 @@ func (m *BatchManagerImpl) ReadBatchEntries(ctx context.Context, batchPath strin
 	allLogs := []LogEntry{}
 
 	// read compressed bytes
-	compressedBatchBytes, err := m.storage.ReadBatch(ctx, batchPath)
+	data, err := m.storage.ReadBatch(ctx, batchPath)
 	if err != nil {
 		return nil, fmt.Errorf("batch manager failed to read batch bytes: %v", err)
 	}
 
+	version, length, err := parseBatchMetadata(data)
+	if err != nil {
+		return nil, err
+	}
+
+	if version != 0 {
+		panic(fmt.Sprintf("trying to read batch with unknown version %d", version))
+	}
+
 	// decompress bytes
-	batchBytes, err := m.decoder.DecodeAll(compressedBatchBytes, nil)
+	batchBytes, err := m.decoder.DecodeAll(data, nil)
 	if err != nil {
 		return nil, fmt.Errorf("batch manager failed to decompress batch bytes: %v", err)
 	}
@@ -138,6 +155,11 @@ func (m *BatchManagerImpl) ReadBatchEntries(ctx context.Context, batchPath strin
 		allLogs = append(allLogs, entry)
 	}
 
+	// make sure the length matches the parsed logs length
+	if len(allLogs) != int(length) {
+		panic("length from batch file does not match actual length")
+	}
+
 	// return all logs if no positions is passed
 	if len(positions) == 0 {
 		return allLogs, nil
@@ -151,7 +173,7 @@ func (m *BatchManagerImpl) ReadBatchEntries(ctx context.Context, batchPath strin
 	return logs, nil
 }
 
-func (m *BatchManagerImpl) DeleteBatch(ctx context.Context, batchPath string) error {
+func (m *BatchManagerImpl) DeleteBatch(ctx context.Context, batchPath string) (int64, error) {
 	// TODO: delete log entries from the index
 	return m.storage.DeleteBatch(ctx, batchPath)
 }

@@ -19,13 +19,11 @@ type LogEntry struct {
 	KV        map[string]string `json:"kv"`
 	Line      string            `json:"line"`
 	position  LogPosition
-
-	// mu sync.Mutex
 }
 
 func NewLogEntry(kv map[string]string, message string) *LogEntry {
 	return &LogEntry{
-		Timestamp: time.Now().UnixMicro(),
+		Timestamp: time.Now().Add(-240 * time.Hour).UnixMicro(),
 		KV:        kv,
 		Line:      message,
 	}

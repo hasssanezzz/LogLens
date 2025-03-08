@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strconv"
 	"strings"
@@ -8,6 +9,15 @@ import (
 
 	"github.com/blevesearch/bleve/v2"
 )
+
+const BatchHeaderSize = 9
+
+func parseBatchMetadata(data []byte) (byte, uint32, error) {
+	if string(data[:4]) != "LENS" {
+		return 0, 0, fmt.Errorf("reading a batch with invalid magin code %q", string(data[:4]))
+	}
+	return data[4], binary.LittleEndian.Uint32(data[5:9]), nil
+}
 
 func positionToId(log *LogPosition) string {
 	return fmt.Sprintf("%s|%d", log.BatchPath, log.Offset)
@@ -64,7 +74,7 @@ func createSearchRequest(q *Query) *bleve.SearchRequest {
 	}
 
 	searchRequest := bleve.NewSearchRequest(searchQuery)
-	searchRequest.Size = q.MaxResults
+	searchRequest.Size = int(q.MaxResults)
 	searchRequest.SortBy([]string{"timestamp"})
 
 	return searchRequest
