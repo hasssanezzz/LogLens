@@ -121,16 +121,17 @@ func (m *DiskIndexManager) Search(ctx context.Context, q Query) (*SearchResult, 
 	result := &SearchResult{
 		Total:      int(bleveResult.Total),
 		SearchTime: time.Since(startTime).Milliseconds(),
-		Matches:    LogPositions{},
+		Matches:    MappedLogPositions{},
+		Positions:  []LogPosition{},
 	}
 
 	for _, hit := range bleveResult.Hits {
 		logPosition := idToPosition(hit.ID)
+		result.Positions = append(result.Positions, logPosition)
 		result.Matches[logPosition.BatchPath] = append(result.Matches[logPosition.BatchPath], logPosition)
 	}
 
 	result.RetrievalTime = time.Since(startTime).Milliseconds()
-
 	return result, nil
 }
 

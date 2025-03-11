@@ -93,7 +93,7 @@ func (m *BatchManagerImpl) CreateBatch(ctx context.Context, logs []*LogEntry) (s
 	return path, nil
 }
 
-func (m *BatchManagerImpl) RetrieveLogs(ctx context.Context, positions LogPositions) ([]LogEntry, error) {
+func (m *BatchManagerImpl) RetrieveLogs(ctx context.Context, positions MappedLogPositions) ([]LogEntry, error) {
 	allLogs := []LogEntry{}
 
 	for batchPath, positionsItr := range positions {
@@ -126,7 +126,7 @@ func (m *BatchManagerImpl) ReadBatchEntries(ctx context.Context, batchPath strin
 	}
 
 	// decompress bytes
-	batchBytes, err := m.decoder.DecodeAll(data, nil)
+	batchBytes, err := m.decoder.DecodeAll(data[BatchHeaderSize:], nil)
 	if err != nil {
 		return nil, fmt.Errorf("batch manager failed to decompress batch bytes: %v", err)
 	}

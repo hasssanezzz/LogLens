@@ -1,15 +1,17 @@
 package api
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/hasssanezzz/try-bleve/internal"
 )
+
+const DateLayout = "2006-01-02"
 
 type API struct {
 	LogLens internal.LogLens
@@ -32,7 +34,7 @@ func (api *API) getHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := api.LogLens.Search(context.Background(), q)
+	result, err := api.LogLens.Search(r.Context(), q)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte("server failed to process the query"))
@@ -42,6 +44,46 @@ func (api *API) getHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(result)
+}
+
+func (api *API) rangeCountHandler(w http.ResponseWriter, r *http.Request) {
+	start, end := r.URL.Query().Get("start"), r.URL.Query().Get("end")
+	if start == "" || end == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("please provide start/end date"))
+		return
+	}
+
+	// parse the start date
+	sdate, err := time.Parse(DateLayout, start)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("please provide a valid start date"))
+		log.Println(err)
+		return
+	}
+
+	// parse the end date
+	edate, err := time.Parse(DateLayout, end)
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		w.Write([]byte("please provide a valid end date"))
+		log.Println(err)
+		return
+	}
+
+	results, err := api.LogLens.RangeCountSearch(r.Context(), sdate.UnixMicro(), edate.UnixMicro())
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte("server failed to process the query"))
+		log.Printf("bad query recieved \n%q -> %q\nerror: %v\n", start, end, err)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(results)
 }
 
 func (api *API) postHandler(w http.ResponseWriter, r *http.Request) {
@@ -65,5 +107,6 @@ func (api *API) postHandler(w http.ResponseWriter, r *http.Request) {
 
 func (api *API) SetupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /", api.getHandler)
+	mux.HandleFunc("GET /range-count", api.rangeCountHandler)
 	mux.HandleFunc("POST /", api.postHandler)
 }

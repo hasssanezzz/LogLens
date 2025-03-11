@@ -17,7 +17,8 @@ type DiskStorageManager struct {
 
 func NewDiskStorageManager(homepath string) StorageManager {
 	return &DiskStorageManager{
-		homepath: homepath,
+		homepath:    homepath,
+		openBatches: map[string]*os.File{},
 	}
 }
 
@@ -63,6 +64,7 @@ func (m *DiskStorageManager) ReadBatch(ctx context.Context, path string) ([]byte
 		return nil, fmt.Errorf("storage manager failed to read batch %q: %v", path, err)
 	}
 
+	reader.Seek(0, io.SeekStart)
 	return data, nil
 }
 
@@ -86,6 +88,7 @@ func (m *DiskStorageManager) ReadFirstNBytesFromBatch(ctx context.Context, batch
 		return nil, fmt.Errorf("failed to read %d only %d can be read", n, readn)
 	}
 
+	batch.Seek(0, io.SeekStart)
 	return buff, nil
 }
 

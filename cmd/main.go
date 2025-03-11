@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/hasssanezzz/try-bleve/cmd/api"
+	"github.com/rs/cors"
 )
 
 func parseArgs() (string, string) {
@@ -28,9 +29,19 @@ func main() {
 	mux := http.NewServeMux()
 	api.SetupRoutes(mux)
 
+	corsOptions := cors.New(cors.Options{
+		AllowedOrigins:   []string{"http://localhost:5173"},        // Allow your frontend React app's URL
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"}, // Allowed HTTP methods
+		AllowedHeaders:   []string{"*"},                            // Allow all headers
+		AllowCredentials: true,                                     // Allow credentials (cookies, authorization headers, etc.)
+	})
+
+	// Wrap the mux with CORS middleware
+	handlerWithCORS := corsOptions.Handler(mux)
+
 	server := &http.Server{
 		Addr:    addr,
-		Handler: mux,
+		Handler: handlerWithCORS,
 	}
 
 	go func() {

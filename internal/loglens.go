@@ -28,6 +28,8 @@ type LogLensImpl struct {
 	entryChan chan LogEntry
 }
 
+// TODO: run a cron job to flush the buffer as new days passes
+
 func NewLogLens(homepath string) (LogLens, error) {
 	ctx := context.Background()
 
@@ -62,6 +64,7 @@ func NewLogLens(homepath string) (LogLens, error) {
 	for _, entry := range walEntries {
 		buffer.Add(ctx, &entry)
 	}
+	buffer.Index(ctx)
 
 	lens := &LogLensImpl{
 		wal:              wal,
@@ -110,34 +113,78 @@ func (lens *LogLensImpl) IngestBatch(ctx context.Context, logs []*LogEntry) erro
 	return nil
 }
 
+// TODO: refacor: remove the whole idea of the MappedLogPositions things
+// by doing this exclusively in the BatchManager.RetrieveLogs
+// to reduce overhead :)
+
 func (lens *LogLensImpl) Search(ctx context.Context, query Query) (*SearchResult, error) {
 	memResults, err := lens.buffer.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	results, err := lens.indexManager.Search(ctx, query)
+	query.MaxResults -= len(memResults.Logs)
+	if query.MaxResults <= 0 && len(memResults.Logs) > 0 {
+		memResults.FreqMap = DateFrequencryMap{time.Now().String()[:10]: len(memResults.Logs)}
+		return memResults, nil
+	}
+
+	retrievalTimeStart := time.Now()
+	diskResults, err := lens.indexManager.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
 
-	for _, match := range results.Matches {
-		for _, position := range match {
-			if position.BatchPath == "" {
-				panic("something very bad just happened")
-			}
-		}
-	}
-
-	logs, err := lens.batchManager.RetrieveLogs(ctx, results.Matches)
+	logs, err := lens.batchManager.RetrieveLogs(ctx, diskResults.Matches)
 	if err != nil {
 		return nil, fmt.Errorf("loglens failed to retrieve logs from the batch manager: %v", err)
 	}
 
-	results.Total += memResults.Total
-	results.SearchTime += memResults.SearchTime
-	results.RetrievalTime += memResults.RetrievalTime
-	results.Logs = append(logs, memResults.Logs...)
+	// aggregate the results
+	diskResults.Total += memResults.Total
+	diskResults.SearchTime += memResults.SearchTime
+	diskResults.RetrievalTime += memResults.RetrievalTime + time.Since(retrievalTimeStart).Milliseconds()
+	diskResults.Logs = append(logs, memResults.Logs...)
+
+	diskResults.FreqMap = createFrequencyMap(diskResults.Matches)
+	if len(memResults.Logs) > 0 {
+		diskResults.FreqMap[time.Now().String()[:10]] += len(memResults.Logs)
+	}
+
+	return diskResults, nil
+}
+
+func (lens *LogLensImpl) RangeCountSearch(ctx context.Context, start, end int64) (*RangeCountResult, error) {
+	query := Query{
+		TimeRange: TimeWindow{
+			Start: start,
+			End:   end,
+		},
+		MaxResults: 1e18,
+	}
+
+	indexResults, err := lens.indexManager.Search(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+
+	results := &RangeCountResult{
+		FreqMap:    DateFrequencryMap{},
+		SearchTime: indexResults.SearchTime,
+	}
+
+	for path, positions := range indexResults.Matches {
+		results.FreqMap[getDateFromBatchPath(path)] += len(positions)
+		results.Total += len(positions)
+	}
+
+	// add buffer size if today is in range
+	now := time.Now()
+	nowf := now.String()[:10]
+	startf, endf := unixMicroToTime(start).String()[:10], unixMicroToTime(end).String()[:10]
+	if (now.UnixMicro() >= start && now.UnixMicro() <= end) || startf == nowf || endf == nowf {
+		results.FreqMap[now.String()[:10]] += lens.buffer.Size(ctx)
+	}
 	return results, nil
 }
 

@@ -12,6 +12,7 @@ type LogLens interface {
 
 	// Query
 	Search(ctx context.Context, query Query) (*SearchResult, error)
+	RangeCountSearch(ctx context.Context, start, end int64) (*RangeCountResult, error)
 
 	// Maintenance
 	Cleanup(ctx context.Context, retentionDays int) (CleanupReport, error)
@@ -56,13 +57,14 @@ type StorageManager interface {
 
 type BatchManager interface {
 	CreateBatch(ctx context.Context, logs []*LogEntry) (string, error)
-	RetrieveLogs(ctx context.Context, positions LogPositions) ([]LogEntry, error)
+	RetrieveLogs(ctx context.Context, positions MappedLogPositions) ([]LogEntry, error)
 	ReadBatchEntries(ctx context.Context, batchPath string, positions []LogPosition) ([]LogEntry, error)
 	DeleteBatch(ctx context.Context, batchPath string) (int64, error)
 }
 
 type LogBuffer interface {
 	Add(ctx context.Context, entry *LogEntry)
+	Index(ctx context.Context)
 	AddBuffer(ctx context.Context, batch []*LogEntry)
 	Search(ctx context.Context, q Query) (*SearchResult, error)
 	Flush(ctx context.Context) ([]*LogEntry, error)

@@ -3,6 +3,7 @@ package internal
 import (
 	"encoding/binary"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,9 +15,14 @@ const BatchHeaderSize = 9
 
 func parseBatchMetadata(data []byte) (byte, uint32, error) {
 	if string(data[:4]) != "LENS" {
-		return 0, 0, fmt.Errorf("reading a batch with invalid magin code %q", string(data[:4]))
+		return 0, 0, fmt.Errorf("magic number mismatch %q", string(data[:4]))
 	}
 	return data[4], binary.LittleEndian.Uint32(data[5:9]), nil
+}
+
+func getDateFromBatchPath(path string) string {
+	base := filepath.Dir(filepath.ToSlash(path))
+	return strings.ReplaceAll(base[len(base)-10:], "/", "-")
 }
 
 func positionToId(log *LogPosition) string {
@@ -49,7 +55,7 @@ func logsToIds(logs []*LogEntry) []string {
 	return arr
 }
 
-func createSearchRequest(q *Query) *bleve.SearchRequest {
+func createSearchRequest(q *Query, ignoreMaxResult ...bool) *bleve.SearchRequest {
 	searchQuery := bleve.NewConjunctionQuery()
 
 	if q.Text != "" {
@@ -74,8 +80,28 @@ func createSearchRequest(q *Query) *bleve.SearchRequest {
 	}
 
 	searchRequest := bleve.NewSearchRequest(searchQuery)
-	searchRequest.Size = int(q.MaxResults)
-	searchRequest.SortBy([]string{"timestamp"})
+	searchRequest.SortBy([]string{"-timestamp"})
+	if len(ignoreMaxResult) <= 0 {
+		searchRequest.Size = q.MaxResults
+	} else {
+		searchRequest.Size = 1e18
+	}
 
 	return searchRequest
+}
+
+func createFrequencyMap(matches MappedLogPositions) DateFrequencryMap {
+	freqMap := DateFrequencryMap{}
+	for path, positions := range matches {
+		freqMap[getDateFromBatchPath(path)] += len(positions)
+	}
+	return freqMap
+}
+
+func mapLogPositions(p []LogPosition) MappedLogPositions {
+	m := MappedLogPositions{}
+	for _, i := range p {
+		m[i.BatchPath] = append(m[i.BatchPath], i)
+	}
+	return m
 }

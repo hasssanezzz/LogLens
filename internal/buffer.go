@@ -57,6 +57,15 @@ func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
 	}
 }
 
+func (lb *MemoryLogBuffer) Index(ctx context.Context) {
+	currLen := len(lb.logs)
+	logsToIndex := lb.logs[min(0, currLen-TemporalIndexBatchSize):]
+	err := lb.index.IndexBatch(ctx, logsToIndex)
+	if err != nil {
+		panic(err) // FOR NOW
+	}
+}
+
 func (lb *MemoryLogBuffer) AddBuffer(ctx context.Context, batch []*LogEntry) {
 	panic("unimplemented")
 }
@@ -70,6 +79,7 @@ func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResu
 		return nil, err
 	}
 
+	retrievalTimeStart := time.Now()
 	logsFromBuffer := []LogEntry{}
 	for _, match := range results.Matches {
 		for _, position := range match {
@@ -81,6 +91,7 @@ func (lb *MemoryLogBuffer) Search(ctx context.Context, query Query) (*SearchResu
 		}
 	}
 	results.Logs = logsFromBuffer
+	results.RetrievalTime += time.Since(retrievalTimeStart).Milliseconds()
 
 	return results, nil
 }

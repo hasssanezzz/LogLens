@@ -7,13 +7,6 @@ import (
 	"time"
 )
 
-type LogPosition struct {
-	BatchPath string `json:"batch_path"`
-	Offset    int    `json:"offset"`
-}
-
-type LogPositions map[string][]LogPosition // "batch_path" -> []LogPosition
-
 type LogEntry struct {
 	Timestamp int64             `json:"timestamp"`
 	KV        map[string]string `json:"kv"`
@@ -22,10 +15,12 @@ type LogEntry struct {
 }
 
 func NewLogEntry(kv map[string]string, message string) *LogEntry {
+	// var base int64 = 1735682400000000
 	return &LogEntry{
-		Timestamp: time.Now().Add(-240 * time.Hour).UnixMicro(),
-		KV:        kv,
-		Line:      message,
+		Timestamp: time.Now().UnixMicro(),
+		// Timestamp: base + rand.Int63n(5184000000000),
+		KV:   kv,
+		Line: message,
 	}
 }
 
@@ -44,9 +39,3 @@ func (l *LogEntry) GetTime() time.Time {
 func (l *LogEntry) Type() string {
 	return "log"
 }
-
-// func (l *LogEntry) SetPosition(p LogPosition) {
-// 	l.mu.Lock()
-// 	defer l.mu.Unlock()
-// 	l.position = p
-// }

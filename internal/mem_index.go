@@ -79,16 +79,18 @@ func (m *MemoryIndexManagerImpl) Search(ctx context.Context, q Query) (*SearchRe
 	result := &SearchResult{
 		Total:      int(bleveResult.Total),
 		SearchTime: time.Since(startTime).Milliseconds(),
-		Matches:    LogPositions{},
+		Positions:  []LogPosition{},
+		Matches:    MappedLogPositions{},
 	}
 
 	for _, hit := range bleveResult.Hits {
 		logPosition := idToPosition(hit.ID)
+		result.Positions = append(result.Positions, logPosition)
 		result.Matches[logPosition.BatchPath] = append(result.Matches[logPosition.BatchPath], logPosition)
 	}
 
 	result.RetrievalTime = time.Since(startTime).Milliseconds()
-
+	result.Count = len(result.Positions)
 	return result, nil
 }
 
