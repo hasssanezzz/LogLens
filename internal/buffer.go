@@ -59,7 +59,7 @@ func (lb *MemoryLogBuffer) Add(ctx context.Context, entry *LogEntry) {
 
 func (lb *MemoryLogBuffer) Index(ctx context.Context) {
 	currLen := len(lb.logs)
-	logsToIndex := lb.logs[min(0, currLen-TemporalIndexBatchSize):]
+	logsToIndex := lb.logs[max(0, currLen-TemporalIndexBatchSize):]
 	err := lb.index.IndexBatch(ctx, logsToIndex)
 	if err != nil {
 		panic(err) // FOR NOW
