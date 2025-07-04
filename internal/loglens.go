@@ -33,6 +33,9 @@ type LogLensImpl struct {
 func NewLogLens(homepath string) (LogLens, error) {
 	ctx := context.Background()
 
+	// TODO: move WAL ownership to the buffer implementation.
+	// This ensures logs are durably recorded before being added to the buffer,
+	// and decouples WAL concerns from the overall LogLens system.
 	wal, err := NewDiskWAL(filepath.Join(homepath, "wal"))
 	if err != nil {
 		return nil, err
@@ -174,8 +177,9 @@ func (lens *LogLensImpl) RangeCountSearch(ctx context.Context, start, end int64)
 	}
 
 	for path, positions := range indexResults.Matches {
-		results.FreqMap[getDateFromBatchPath(path)] += len(positions)
-		results.Total += len(positions)
+		count := len(positions)
+		results.FreqMap[getDateFromBatchPath(path)] += count
+		results.Total += count
 	}
 
 	// add buffer size if today is in range
@@ -201,15 +205,29 @@ func (lens *LogLensImpl) Stats(ctx context.Context) (SystemStats, error) {
 		IndexSize:     indexSize,
 		BufferSize:    bufferSize,
 		UptimeMS:      time.Now().UnixMilli() - lens.startDate,
-		ActiveBatches: 0,
-		StorageUsedMB: 0,
+		ActiveBatches: 0, // TODO
+		StorageUsedMB: 0, // TODO
 	}, nil
 }
 
 // Lifecycle
 func (lens *LogLensImpl) Shutdown(ctx context.Context) error {
+	// WIP
+
+	if err := lens.indexManager.Close(ctx); err != nil {
+		return err
+	}
+
+	if err := lens.wal.Close(ctx); err != nil {
+		return err
+	}
+
+	// TODO: flush the buffer and clear the WAL
+
 	return nil
 }
+
+// internal functions
 
 func (lens *LogLensImpl) consumeLogsFromChan() {
 	go func() {
@@ -217,7 +235,7 @@ func (lens *LogLensImpl) consumeLogsFromChan() {
 			time.Sleep(1 * time.Second)
 			l := len(lens.entryChan)
 			if l > 0 {
-				log.Println("buffen channel size:", l)
+				log.Println("buffer channel size:", l)
 			}
 		}
 	}()
@@ -225,11 +243,22 @@ func (lens *LogLensImpl) consumeLogsFromChan() {
 	for entry := range lens.entryChan {
 		ctx := context.Background()
 
+		// Determine when to flush the buffer to disk:
+		//
+		// 1. If the buffer size reaches or exceeds the configured threshold (`BufferThreshold`),
+		//    we flush to ensure logs are periodically persisted and indexed.
+		//
+		// 2. If a new log entry belongs to a different calendar day than the latest entry in the buffer,
+		//    we flush the current buffer before adding the new log. This ensures that each batch file
+		//    contains logs from only one calendar day, which simplifies querying and retention logic.
+		//
+		// Batch files are stored in date-based directories (e.g., /2025/11/03/xxxx-xxxx.lens),
+		// so mixing logs from multiple dates in a single batch is not allowed.
+
 		if lens.buffer.Size(ctx) >= BufferThreshold ||
 			(!isSameCalendarDay(lens.buffer.LatestEntryTimestamp(ctx), entry.Timestamp) &&
 				lens.buffer.LatestEntryTimestamp(ctx) != 0 &&
 				lens.buffer.Size(ctx) > 0) {
-			println("flushing the buffer with length:", lens.buffer.Size(ctx))
 			if err := lens.flushBuffer(); err != nil {
 				panic(err)
 			}
@@ -261,6 +290,7 @@ func (lens *LogLensImpl) flushBuffer() error {
 		return err
 	}
 
+	// the IngestBatch function mutates the log positions in the logs slice
 	if err := lens.IngestBatch(ctx, logs); err != nil {
 		return err
 	}

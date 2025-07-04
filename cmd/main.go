@@ -30,13 +30,12 @@ func main() {
 	api.SetupRoutes(mux)
 
 	corsOptions := cors.New(cors.Options{
-		AllowedOrigins:   []string{"http://localhost:5173"},        // Allow your frontend React app's URL
-		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"}, // Allowed HTTP methods
-		AllowedHeaders:   []string{"*"},                            // Allow all headers
-		AllowCredentials: true,                                     // Allow credentials (cookies, authorization headers, etc.)
+		AllowedOrigins:   []string{"http://localhost:5173"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE"},
+		AllowedHeaders:   []string{"*"},
+		AllowCredentials: true,
 	})
 
-	// Wrap the mux with CORS middleware
 	handlerWithCORS := corsOptions.Handler(mux)
 
 	server := &http.Server{

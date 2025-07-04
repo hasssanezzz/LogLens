@@ -42,6 +42,7 @@ func NewBleveIndexManager(indexPath string) (IndexManager, error) {
 	return m, nil
 }
 
+// TODO: make this a private function
 func (m *DiskIndexManager) Listen(ctx context.Context) {
 	for {
 		batch := <-m.consumeBatchChan

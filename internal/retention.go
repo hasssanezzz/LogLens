@@ -47,6 +47,9 @@ func (m *RetentionManagerImpl) Scan(ctx context.Context) (CleanupReport, error) 
 		freedBytes += float64(fileSize)
 	}
 
+	// TODO: delete the log positions from the index
+	// TODO: populate the cleanup report results in the m.stats
+
 	return CleanupReport{
 		DeletedBatches: len(results.Matches),
 		DeletedLogs:    len(results.Matches) * BufferThreshold,

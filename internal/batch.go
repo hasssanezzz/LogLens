@@ -174,6 +174,11 @@ func (m *BatchManagerImpl) ReadBatchEntries(ctx context.Context, batchPath strin
 }
 
 func (m *BatchManagerImpl) DeleteBatch(ctx context.Context, batchPath string) (int64, error) {
+	// WIP
 	// TODO: delete log entries from the index
 	return m.storage.DeleteBatch(ctx, batchPath)
+}
+
+func (m *BatchManagerImpl) Close(ctx context.Context) error {
+	return m.storage.Close(ctx)
 }

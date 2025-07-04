@@ -12,7 +12,7 @@ import (
 
 type DiskStorageManager struct {
 	homepath    string
-	openBatches map[string]*os.File
+	openBatches map[string]*os.File // TODO: limit the size of opened files, LRU?
 }
 
 func NewDiskStorageManager(homepath string) StorageManager {
